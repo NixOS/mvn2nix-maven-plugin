@@ -1,11 +1,17 @@
 package com.shealevy;
 
+import java.util.List;
 import java.util.ArrayList;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.io.IOException;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+
+import javax.json.Json;
+import javax.json.stream.JsonGenerator;
 
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
@@ -13,8 +19,6 @@ import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.project.MavenProject;
-import org.apache.maven.artifact.repository.ArtifactRepository;
-import org.apache.maven.artifact.repository.metadata.ArtifactRepositoryMetadata;
 
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.RepositorySystemSession;
@@ -24,9 +28,12 @@ import org.eclipse.aether.resolution.DependencyResult;
 import org.eclipse.aether.resolution.ArtifactResult;
 import org.eclipse.aether.resolution.DependencyResolutionException;
 import org.eclipse.aether.graph.Dependency;
+import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.graph.Exclusion;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.repository.ArtifactRepository;
+import org.eclipse.aether.repository.RemoteRepository;
 
 import org.apache.commons.codec.binary.Hex;
 
@@ -67,8 +74,10 @@ public class Mvn2NixMojo extends AbstractMojo
 			Dependency dep = new Dependency(art, scope, opt, excls);
 			deps.add(dep);
 		}
+		List<RemoteRepository> projectRepos =
+			project.getRemoteProjectRepositories();
 		CollectRequest cr = new CollectRequest((Dependency) null, deps,
-				project.getRemoteProjectRepositories());
+				projectRepos);
 		DependencyRequest dr = new DependencyRequest(cr, null);
 		DependencyResult results;
 		try {
@@ -80,30 +89,106 @@ public class Mvn2NixMojo extends AbstractMojo
 					e);
 		}
 		ByteBuffer buf = ByteBuffer.allocateDirect(512 * 125);
-		for (ArtifactResult res : results.getArtifactResults()) {
-			Artifact art = res.getArtifact();
-			MessageDigest md;
-			try {
-				md = MessageDigest.getInstance("SHA-256");
-			} catch (NoSuchAlgorithmException e) {
-				throw new MojoExecutionException(
-						"Creating SHA-256 hash",
-						e);
+		try (JsonGenerator gen = Json.createGenerator(
+					new FileOutputStream("deps.json"))) {
+			gen.writeStartObject();
+			gen.writeStartArray("project-repositories");
+			for (RemoteRepository repo : projectRepos) {
+				gen.writeStartObject();
+				gen.write(
+					"authenticated",
+					repo.getAuthentication() != null);
+				gen.write("content-type",
+						repo.getContentType());
+				gen.write("id", repo.getId());
+				gen.write("url", repo.getUrl());
+				gen.writeEnd();
 			}
-			try (FileChannel fc = FileChannel.open(
-						art.getFile().toPath())) {
-				while (fc.read(buf) != -1) {
-					buf.flip();
-					md.update(buf);
-					buf.clear();
+			gen.writeEnd();
+			gen.writeStartArray("dependencies");
+			for (ArtifactResult res :
+					results.getArtifactResults()) {
+				gen.writeStartObject();
+
+				Artifact art = res.getArtifact();
+				gen.writeStartObject("artifact");
+				gen.write("artifact-id", art.getArtifactId());
+				gen.write("base-version", art.getBaseVersion());
+				gen.write("classifier", art.getClassifier());
+				gen.write("extension", art.getExtension());
+				gen.write("group-id", art.getGroupId());
+				gen.write("version", art.getVersion());
+				gen.write("snapshot", art.isSnapshot());
+				gen.writeEnd();
+
+				ArtifactRepository artRepo =
+					res.getRepository();
+				gen.writeStartObject("repository");
+				gen.write("content-type",
+						artRepo.getContentType());
+				gen.write("id", artRepo.getId());
+				gen.writeEnd();
+
+				DependencyNode node = res.getRequest()
+					.getDependencyNode();
+				if (node != null) {
+					Dependency dep = node.getDependency();
+					gen.writeStartObject("dependency");
+					gen.write("scope", dep.getScope());
+					gen.write("optional", dep.isOptional());
+					gen.writeStartArray("exclusions");
+					for (Exclusion excl :
+							dep.getExclusions()) {
+						gen.writeStartObject();
+						gen.write(
+							"artifact-id",
+							excl.getArtifactId());
+						gen.write(
+							"classifier",
+							excl.getClassifier());
+						gen.write(
+							"extension",
+							excl.getExtension());
+						gen.write(
+							"group-id",
+							excl.getGroupId());
+						gen.writeEnd();
+					}
+					gen.writeEnd();
+					gen.writeEnd();
 				}
-			} catch (IOException e) {
-				throw new MojoExecutionException(
-						"Reading artifact",
-						e);
+
+				MessageDigest md;
+				try {
+					md = MessageDigest.getInstance(
+							"SHA-256");
+				} catch (NoSuchAlgorithmException e) {
+					throw new MojoExecutionException(
+							"Creating SHA-256 hash",
+							e);
+				}
+				try (FileChannel fc = FileChannel.open(
+						art.getFile().toPath())) {
+					while (fc.read(buf) != -1) {
+						buf.flip();
+						md.update(buf);
+						buf.clear();
+					}
+				} catch (IOException e) {
+					throw new MojoExecutionException(
+							"Reading artifact",
+							e);
+				}
+				gen.write("sha256", Hex.encodeHexString(
+							md.digest()));
+				gen.writeEnd();
 			}
-			getLog().info(art.getFile().toString());
-			getLog().info(new String(Hex.encodeHex(md.digest())));
+			gen.writeEnd();
+			gen.writeEnd();
+		} catch (FileNotFoundException e) {
+			throw new MojoExecutionException(
+					"Opening deps.json",
+					e);
 		}
 	}
 }

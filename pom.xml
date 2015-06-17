@@ -30,6 +30,7 @@
       <groupId>org.eclipse.aether</groupId>
       <artifactId>aether-api</artifactId>
       <version>1.0.2.v20150114</version>
+      <scope>provided</scope>
     </dependency>
     <dependency>
       <groupId>commons-codec</groupId>
@@ -41,6 +42,16 @@
       <artifactId>maven-plugin-annotations</artifactId>
       <version>3.4</version>
       <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>javax.json</groupId>
+      <artifactId>javax.json-api</artifactId>
+      <version>1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.glassfish</groupId>
+      <artifactId>javax.json</artifactId>
+      <version>1.0.4</version>
     </dependency>
   </dependencies>
   <build>
