@@ -11,6 +11,7 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Path;
 import java.net.URI;
 import java.net.URISyntaxException;
 
@@ -94,6 +95,30 @@ public class Mvn2NixMojo extends AbstractMojo
 		return new Dependency(art, scope, opt);
 	}
 
+	private String hashFile(Path p, ByteBuffer buf)
+		throws MojoExecutionException {
+		MessageDigest md;
+		try {
+			md = MessageDigest.getInstance(
+					"SHA-256");
+		} catch (NoSuchAlgorithmException e) {
+			throw new MojoExecutionException(
+					"Creating SHA-256 hash",
+					e);
+		}
+		try (FileChannel fc = FileChannel.open(p)) {
+			while (fc.read(buf) != -1) {
+				buf.flip();
+				md.update(buf);
+				buf.clear();
+			}
+		} catch (IOException e) {
+			throw new MojoExecutionException(
+					"Reading file",
+					e);
+		}
+		return Hex.encodeHexString(md.digest());
+	}
 	private void emitDependencies(Dependency rootDep,
 		List<RemoteRepository> repos,
 		ByteBuffer buf,
@@ -194,8 +219,8 @@ public class Mvn2NixMojo extends AbstractMojo
 						"Reading artifact",
 						e);
 			}
-			gen.write("sha256", Hex.encodeHexString(
-						md.digest()));
+			gen.write("sha256", hashFile(art.getFile().toPath(),
+						buf));
 
 			RepositoryLayout layout;
 			try {
