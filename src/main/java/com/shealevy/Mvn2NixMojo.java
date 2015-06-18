@@ -193,9 +193,12 @@ public class Mvn2NixMojo extends AbstractMojo
 
 				URI abs;
 				try {
-					abs = new URI(repo.getUrl())
-						.resolve(layout.getLocation(art,
-								false));
+					/* Intentionally not using URI.resolve,
+					 * it drops any path component in the
+					 * original URL.
+					 */
+					abs = new URI(repo.getUrl() + "/" +
+						layout.getLocation(art, false));
 				} catch (URISyntaxException e) {
 					throw new MojoExecutionException(
 						"Parsing repository URI",
