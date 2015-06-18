@@ -9,6 +9,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
@@ -32,8 +34,10 @@ import org.eclipse.aether.graph.DependencyNode;
 import org.eclipse.aether.graph.Exclusion;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.repository.ArtifactRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
+import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
+import org.eclipse.aether.transfer.NoRepositoryLayoutException;
 
 import org.apache.commons.codec.binary.Hex;
 
@@ -45,6 +49,9 @@ public class Mvn2NixMojo extends AbstractMojo
 
 	@Component
 	private RepositorySystem repoSystem;
+
+	@Component
+	private RepositoryLayoutProvider layoutProvider;
 
 	@Parameter(defaultValue="${repositorySystemSession}", readonly=true)
 	private RepositorySystemSession repoSession;
@@ -91,21 +98,7 @@ public class Mvn2NixMojo extends AbstractMojo
 		ByteBuffer buf = ByteBuffer.allocateDirect(512 * 125);
 		try (JsonGenerator gen = Json.createGenerator(
 					new FileOutputStream("deps.json"))) {
-			gen.writeStartObject();
-			gen.writeStartArray("project-repositories");
-			for (RemoteRepository repo : projectRepos) {
-				gen.writeStartObject();
-				gen.write(
-					"authenticated",
-					repo.getAuthentication() != null);
-				gen.write("content-type",
-						repo.getContentType());
-				gen.write("id", repo.getId());
-				gen.write("url", repo.getUrl());
-				gen.writeEnd();
-			}
-			gen.writeEnd();
-			gen.writeStartArray("dependencies");
+			gen.writeStartArray();
 			for (ArtifactResult res :
 					results.getArtifactResults()) {
 				gen.writeStartObject();
@@ -121,12 +114,16 @@ public class Mvn2NixMojo extends AbstractMojo
 				gen.write("snapshot", art.isSnapshot());
 				gen.writeEnd();
 
-				ArtifactRepository artRepo =
-					res.getRepository();
+				RemoteRepository repo =
+					(RemoteRepository) res.getRepository();
 				gen.writeStartObject("repository");
+				gen.write(
+					"authenticated",
+					repo.getAuthentication() != null);
 				gen.write("content-type",
-						artRepo.getContentType());
-				gen.write("id", artRepo.getId());
+						repo.getContentType());
+				gen.write("id", repo.getId());
+				gen.write("url", repo.getUrl());
 				gen.writeEnd();
 
 				DependencyNode node = res.getRequest()
@@ -181,9 +178,32 @@ public class Mvn2NixMojo extends AbstractMojo
 				}
 				gen.write("sha256", Hex.encodeHexString(
 							md.digest()));
+
+				RepositoryLayout layout;
+				try {
+					layout = layoutProvider
+						.newRepositoryLayout(
+							repoSession,
+							repo);
+				} catch (NoRepositoryLayoutException e) {
+					throw new MojoExecutionException(
+						"Getting repository layout",
+						e);
+				}
+
+				URI abs;
+				try {
+					abs = new URI(repo.getUrl())
+						.resolve(layout.getLocation(art,
+								false));
+				} catch (URISyntaxException e) {
+					throw new MojoExecutionException(
+						"Parsing repository URI",
+						e);
+				}
+				gen.write("url", abs.toString());
 				gen.writeEnd();
 			}
-			gen.writeEnd();
 			gen.writeEnd();
 		} catch (FileNotFoundException e) {
 			throw new MojoExecutionException(
