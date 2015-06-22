@@ -7,6 +7,8 @@ functions.
 Note: This is slower than anyone would like and not expected to be perfect.
 Please open issues if something isn't working for you!
 
+Appears to require maven 3.2.5 to build locally.
+
 Usage
 ------
 
