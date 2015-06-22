@@ -2,7 +2,7 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.shealevy</groupId>
+  <groupId>org.nixos.mvn2nix</groupId>
   <artifactId>mvn2nix-maven-plugin</artifactId>
   <version>1.0.0</version>
   <packaging>maven-plugin</packaging>
@@ -10,7 +10,7 @@
   <name>mvn2nix</name>
   <description>Generate project-info.json for use with nix's Maven
     repository generation functions.</description>
-  <url>https://github.com/shlevy/mvn2nix-maven-plugin</url>
+  <url>https://github.com/NixOS/mvn2nix-maven-plugin</url>
 
   <licenses>
     <license>
@@ -27,9 +27,9 @@
   </developers>
 
   <scm>
-    <connection>scm:git:git://github.com/shlevy/mvn2nix-maven-plugin.git</connection>
-    <developerConnection>scm:git:git@github.com:shlevy/mvn2nix-maven-plugin.git</developerConnection>
-    <url>https://github.com/shlevy/mvn2nix-maven-plugin</url>
+    <connection>scm:git:git://github.com/NixOS/mvn2nix-maven-plugin.git</connection>
+    <developerConnection>scm:git:git@github.com:NixOS/mvn2nix-maven-plugin.git</developerConnection>
+    <url>https://github.com/NixOS/mvn2nix-maven-plugin</url>
   </scm>
 
   <properties>

@@ -21,7 +21,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-package com.shealevy;
+package org.nixos.mvn2nix;
 
 import org.apache.maven.model.Model;
 import org.apache.maven.model.Parent;
