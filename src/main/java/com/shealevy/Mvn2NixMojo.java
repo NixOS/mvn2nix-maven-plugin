@@ -53,8 +53,12 @@ public class Mvn2NixMojo extends AbstractMojo
 	@Component
 	private RepositoryLayoutProvider layoutProvider;
 
-	@Parameter(defaultValue="${repositorySystemSession}", readonly=true)
+	@Parameter(property="repositorySystemSession", readonly=true)
 	private DefaultRepositorySystemSession repoSession;
+
+	@Parameter(property="mvn2nixOutputFile",
+		defaultValue="project-info.json")
+	private String outputFile;
 
 	private Exclusion mavenExclusionToExclusion(
 			org.apache.maven.model.Exclusion excl) {
@@ -372,7 +376,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			work.add(mavenDependencyToDependency(dep));
 		}
 		try (JsonGenerator gen = Json.createGenerator(
-					new FileOutputStream("deps.json"))) {
+					new FileOutputStream(outputFile))) {
 			gen.writeStartObject();
 
 			gen.writeStartObject("project");
@@ -405,7 +409,7 @@ public class Mvn2NixMojo extends AbstractMojo
 			gen.writeEnd();
 		} catch (FileNotFoundException e) {
 			throw new MojoExecutionException(
-					"Opening deps.json",
+					"Opening " + outputFile,
 					e);
 		}
 	}
