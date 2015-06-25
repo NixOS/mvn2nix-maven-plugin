@@ -27,6 +27,8 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Collection;
 import java.util.Iterator;
 import java.io.FileNotFoundException;
@@ -37,6 +39,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.MalformedURLException;
+import java.net.Authenticator;
+import java.net.PasswordAuthentication;
 
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
@@ -49,6 +53,8 @@ import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.repository.internal.ArtifactDescriptorReaderDelegate;
 import org.apache.maven.model.Plugin;
+import org.apache.maven.settings.Settings;
+import org.apache.maven.settings.Server;
 
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.DefaultRepositorySystemSession;
@@ -75,6 +81,9 @@ public class Mvn2NixMojo extends AbstractMojo
 {
 	@Component
 	private MavenProject project;
+
+	@Component
+	private Settings settings;
 
 	@Component
 	private RepositorySystem repoSystem;
@@ -168,9 +177,15 @@ public class Mvn2NixMojo extends AbstractMojo
 		public String hash;
 	}
 
+	private class ServerCred {
+		public String username;
+		public String password;
+	}
+
 	private ArtifactDownloadInfo getDownloadInfo(Artifact art,
 			RepositoryLayout layout,
-			String base) throws MojoExecutionException {
+			String base,
+			final ServerCred cred) throws MojoExecutionException {
 		URI rel = layout.getLocation(art, false);
 		URI abs;
 		try {
@@ -202,6 +217,14 @@ public class Mvn2NixMojo extends AbstractMojo
 				"No SHA-1 for " + art.toString());
 		}
 
+		if (cred != null) {
+			Authenticator.setDefault(new Authenticator() {
+				protected PasswordAuthentication getPasswordAuthentication() {
+					return new PasswordAuthentication(cred.username, cred.password.toCharArray());
+				}
+			});
+		}
+
 		InputStream i;
 		try {
 			i = abs.toURL().openStream();
@@ -213,6 +236,10 @@ public class Mvn2NixMojo extends AbstractMojo
 			throw new MojoExecutionException(
 				"Unable to connect to " + abs.toString(),
 				e);
+		}
+
+		if (cred != null) {
+			Authenticator.setDefault(null);
 		}
 
 		byte[] buf = new byte[40];
@@ -253,7 +280,8 @@ public class Mvn2NixMojo extends AbstractMojo
 		List<RemoteRepository> repos,
 		Set<Dependency> work,
 		Set<Artifact> printed,
-		JsonGenerator gen) throws MojoExecutionException {
+		JsonGenerator gen,
+		Map<String, ServerCred> serverCreds) throws MojoExecutionException {
 		Artifact art = dep.getArtifact();
 		ArtifactDescriptorRequest req = new ArtifactDescriptorRequest(
 			art,
@@ -298,8 +326,12 @@ public class Mvn2NixMojo extends AbstractMojo
 				}
 
 				String base = repo.getUrl();
+				ServerCred cred = serverCreds.get(repo.getId());
 				ArtifactDownloadInfo info =
-					getDownloadInfo(art, layout, base);
+					getDownloadInfo(art,
+							layout,
+							base,
+							cred);
 				gen.write("url", info.url);
 				gen.write("sha1", info.hash);
 
@@ -312,8 +344,10 @@ public class Mvn2NixMojo extends AbstractMojo
 						"pom",
 						rel.getVersion());
 					gen.writeStartObject();
-					info = getDownloadInfo(art, layout,
-						base);
+					info = getDownloadInfo(art,
+						layout,
+						base,
+						cred);
 					gen.write("url", info.url);
 					gen.write("sha1", info.hash);
 					gen.writeEnd();
@@ -385,6 +419,23 @@ public class Mvn2NixMojo extends AbstractMojo
 			d);
 		repoSession.setReadOnly();
 
+		Map<String, ServerCred> serverCreds =
+			new HashMap<String, ServerCred>();
+		for (Server s : settings.getServers()) {
+			String username = s.getUsername();
+			if (username != null) {
+				String password = s.getPassword();
+				if (password == null) {
+					throw new MojoExecutionException(
+						"Repositories authenticated by anything other than username + password not yet supported");
+				}
+				ServerCred cred = new ServerCred();
+				cred.username = username;
+				cred.password = password;
+				serverCreds.put(s.getId(), cred);
+			}
+		}
+
 		Set<Dependency> work = new HashSet<Dependency>();
 		Set<Dependency> seen = new HashSet<Dependency>();
 		Set<Artifact> printed = new HashSet<Artifact>();
@@ -431,7 +482,8 @@ public class Mvn2NixMojo extends AbstractMojo
 						repos,
 						work,
 						printed,
-						gen);
+						gen,
+						serverCreds);
 				}
 			}
 			gen.writeEnd();
