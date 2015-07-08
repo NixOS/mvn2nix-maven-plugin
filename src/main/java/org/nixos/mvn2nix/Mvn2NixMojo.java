@@ -53,8 +53,6 @@ import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.project.MavenProject;
 import org.apache.maven.repository.internal.ArtifactDescriptorReaderDelegate;
 import org.apache.maven.model.Plugin;
-import org.apache.maven.settings.Settings;
-import org.apache.maven.settings.Server;
 
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.DefaultRepositorySystemSession;
@@ -68,7 +66,11 @@ import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
+import org.eclipse.aether.spi.connector.transport.GetTask;
+import org.eclipse.aether.spi.connector.transport.Transporter;
+import org.eclipse.aether.spi.connector.transport.TransporterProvider;
 import org.eclipse.aether.transfer.NoRepositoryLayoutException;
+import org.eclipse.aether.transfer.NoTransporterException;
 
 /**
  * A Mojo to generate JSON for use with nix's Maven repository generation
@@ -83,13 +85,13 @@ public class Mvn2NixMojo extends AbstractMojo
 	private MavenProject project;
 
 	@Component
-	private Settings settings;
-
-	@Component
 	private RepositorySystem repoSystem;
 
 	@Component
 	private RepositoryLayoutProvider layoutProvider;
+
+	@Component
+	private TransporterProvider transporterProvider;
 
 	@Parameter(property="repositorySystemSession", readonly=true)
 	private DefaultRepositorySystemSession repoSession;
@@ -177,15 +179,10 @@ public class Mvn2NixMojo extends AbstractMojo
 		public String hash;
 	}
 
-	private class ServerCred {
-		public String username;
-		public String password;
-	}
-
 	private ArtifactDownloadInfo getDownloadInfo(Artifact art,
 			RepositoryLayout layout,
 			String base,
-			final ServerCred cred) throws MojoExecutionException {
+			Transporter transport) throws MojoExecutionException {
 		URI rel = layout.getLocation(art, false);
 		URI abs;
 		try {
@@ -198,76 +195,32 @@ public class Mvn2NixMojo extends AbstractMojo
 		ArtifactDownloadInfo res = new ArtifactDownloadInfo();
 		res.url = abs.toString();
 
-		abs = null;
+		GetTask task = null;
 		for (RepositoryLayout.Checksum ck :
 				layout.getChecksums(art, false, rel)) {
 			if (ck.getAlgorithm().equals("SHA-1")) {
-				try {
-					abs = new URI(base + "/" +
-							ck.getLocation());
-				} catch (URISyntaxException e) {
-					throw new MojoExecutionException(
-						"Parsing repository URI",
-						e);
-				}
+				task = new GetTask(ck.getLocation());
+				break;
 			}
 		}
-		if (abs == null) {
+		if (task == null) {
 			throw new MojoExecutionException(
 				"No SHA-1 for " + art.toString());
 		}
 
-		if (cred != null) {
-			Authenticator.setDefault(new Authenticator() {
-				protected PasswordAuthentication getPasswordAuthentication() {
-					return new PasswordAuthentication(cred.username, cred.password.toCharArray());
-				}
-			});
-		}
-
-		InputStream i;
 		try {
-			i = abs.toURL().openStream();
-		} catch (MalformedURLException e) {
+			transport.get(task);
+		} catch (Exception e) {
 			throw new MojoExecutionException(
-				"Invalid URL for checksum of " + art.toString(),
-				e);
-		} catch (IOException e) {
-			throw new MojoExecutionException(
-				"Unable to connect to " + abs.toString(),
-				e);
-		}
-
-		if (cred != null) {
-			Authenticator.setDefault(null);
-		}
-
-		byte[] buf = new byte[40];
-		try {
-			int read = i.read(buf);
-			if (read == -1) {
-				throw new MojoExecutionException(
-					"Early EOF downloading " +
-					abs.toString());
-			}
-			while (read < buf.length) {
-				int count =
-					i.read(buf, read, buf.length - read);
-				if (count == -1) {
-					throw new MojoExecutionException(
-						"Early EOF downloading " +
-						abs.toString());
-				}
-				read += count;
-			}
-		} catch (IOException e) {
-			throw new MojoExecutionException(
-				"Downloading " + abs.toString(),
+				"Downloading SHA-1 for " + art.toString(),
 				e);
 		}
 
 		try {
-			res.hash = new String(buf, "UTF-8");
+			res.hash = new String(task.getDataBytes(),
+					0,
+					40,
+					"UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			throw new MojoExecutionException(
 				"Your jvm doesn't support UTF-8, fix that",
@@ -280,8 +233,7 @@ public class Mvn2NixMojo extends AbstractMojo
 		List<RemoteRepository> repos,
 		Set<Dependency> work,
 		Set<Artifact> printed,
-		JsonGenerator gen,
-		Map<String, ServerCred> serverCreds) throws MojoExecutionException {
+		JsonGenerator gen) throws MojoExecutionException {
 		Artifact art = dep.getArtifact();
 		ArtifactDescriptorRequest req = new ArtifactDescriptorRequest(
 			art,
@@ -326,33 +278,45 @@ public class Mvn2NixMojo extends AbstractMojo
 				}
 
 				String base = repo.getUrl();
-				ServerCred cred = serverCreds.get(repo.getId());
-				ArtifactDownloadInfo info =
-					getDownloadInfo(art,
-							layout,
-							base,
-							cred);
-				gen.write("url", info.url);
-				gen.write("sha1", info.hash);
-
-				gen.writeStartArray("relocations");
-				for (Artifact rel : res.getRelocations()) {
-					Artifact relPom = new DefaultArtifact(
-						rel.getGroupId(),
-						rel.getArtifactId(),
-						rel.getClassifier(),
-						"pom",
-						rel.getVersion());
-					gen.writeStartObject();
-					info = getDownloadInfo(art,
-						layout,
-						base,
-						cred);
+				/* TODO: Open the transporters all at once */
+				try (Transporter transport =
+					transporterProvider.newTransporter(
+						repoSession
+						, repo)) {
+					ArtifactDownloadInfo info =
+						getDownloadInfo(art,
+								layout,
+								base,
+								transport);
 					gen.write("url", info.url);
 					gen.write("sha1", info.hash);
+
+					gen.writeStartArray("relocations");
+					for (Artifact rel :
+							res.getRelocations()) {
+						Artifact relPom =
+							new DefaultArtifact(
+							rel.getGroupId(),
+							rel.getArtifactId(),
+							rel.getClassifier(),
+							"pom",
+							rel.getVersion());
+						gen.writeStartObject();
+						info = getDownloadInfo(art,
+							layout,
+							base,
+							transport);
+						gen.write("url", info.url);
+						gen.write("sha1", info.hash);
+						gen.writeEnd();
+					}
 					gen.writeEnd();
+				} catch (NoTransporterException e) {
+					throw new MojoExecutionException(
+						"No transporter for " +
+							art.toString(),
+						e);
 				}
-				gen.writeEnd();
 			}
 			gen.writeEnd();
 		}
@@ -419,23 +383,6 @@ public class Mvn2NixMojo extends AbstractMojo
 			d);
 		repoSession.setReadOnly();
 
-		Map<String, ServerCred> serverCreds =
-			new HashMap<String, ServerCred>();
-		for (Server s : settings.getServers()) {
-			String username = s.getUsername();
-			if (username != null) {
-				String password = s.getPassword();
-				if (password == null) {
-					throw new MojoExecutionException(
-						"Repositories authenticated by anything other than username + password not yet supported");
-				}
-				ServerCred cred = new ServerCred();
-				cred.username = username;
-				cred.password = password;
-				serverCreds.put(s.getId(), cred);
-			}
-		}
-
 		Set<Dependency> work = new HashSet<Dependency>();
 		Set<Dependency> seen = new HashSet<Dependency>();
 		Set<Artifact> printed = new HashSet<Artifact>();
@@ -482,8 +429,7 @@ public class Mvn2NixMojo extends AbstractMojo
 						repos,
 						work,
 						printed,
-						gen,
-						serverCreds);
+						gen);
 				}
 			}
 			gen.writeEnd();
