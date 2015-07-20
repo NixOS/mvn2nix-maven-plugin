@@ -63,6 +63,11 @@ import org.eclipse.aether.graph.Dependency;
 import org.eclipse.aether.graph.Exclusion;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
+import org.eclipse.aether.metadata.Metadata;
+import org.eclipse.aether.metadata.DefaultMetadata;
+import org.eclipse.aether.resolution.VersionResult;
+import org.eclipse.aether.resolution.VersionRequest;
+import org.eclipse.aether.resolution.VersionResolutionException;
 import org.eclipse.aether.repository.RemoteRepository;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayoutProvider;
 import org.eclipse.aether.spi.connector.layout.RepositoryLayout;
@@ -179,40 +184,42 @@ public class Mvn2NixMojo extends AbstractMojo
 		public String hash;
 	}
 
-	private ArtifactDownloadInfo getDownloadInfo(Artifact art,
-			RepositoryLayout layout,
-			String base,
-			Transporter transport) throws MojoExecutionException {
-		URI rel = layout.getLocation(art, false);
+	private ArtifactDownloadInfo getDownloadInfoImpl(String base,
+		URI fileLoc,
+		List<RepositoryLayout.Checksum> checksums,
+		String desc,
+		Transporter transport) throws MojoExecutionException {
+
 		URI abs;
 		try {
-			abs = new URI(base + "/" + rel);
+			abs = new URI(base + "/" + fileLoc);
 		} catch (URISyntaxException e) {
 			throw new MojoExecutionException(
 				"Parsing repository URI",
 				e);
 		}
+
 		ArtifactDownloadInfo res = new ArtifactDownloadInfo();
 		res.url = abs.toString();
 
 		GetTask task = null;
-		for (RepositoryLayout.Checksum ck :
-				layout.getChecksums(art, false, rel)) {
+		for (RepositoryLayout.Checksum ck : checksums) {
 			if (ck.getAlgorithm().equals("SHA-1")) {
 				task = new GetTask(ck.getLocation());
 				break;
 			}
 		}
+
 		if (task == null) {
 			throw new MojoExecutionException(
-				"No SHA-1 for " + art.toString());
+				"No SHA-1 for " + desc);
 		}
 
 		try {
 			transport.get(task);
 		} catch (Exception e) {
 			throw new MojoExecutionException(
-				"Downloading SHA-1 for " + art.toString(),
+				"Downloading SHA-1 for " + desc,
 				e);
 		}
 
@@ -229,12 +236,111 @@ public class Mvn2NixMojo extends AbstractMojo
 		return res;
 	}
 
+	private ArtifactDownloadInfo getDownloadInfo(Artifact art,
+			RepositoryLayout layout,
+			String base,
+			Transporter transport) throws MojoExecutionException {
+		URI fileLoc = layout.getLocation(art, false);
+		List<RepositoryLayout.Checksum> checksums =
+			layout.getChecksums(art, false, fileLoc);
+		return getDownloadInfoImpl(base,
+			fileLoc,
+			checksums,
+			art.toString(),
+			transport);
+	}
+
+	private ArtifactDownloadInfo getDownloadInfo(Metadata m,
+			RepositoryLayout layout,
+			String base,
+			Transporter transport) throws MojoExecutionException {
+		URI fileLoc = layout.getLocation(m, false);
+		List<RepositoryLayout.Checksum> checksums =
+			layout.getChecksums(m, false, fileLoc);
+		return getDownloadInfoImpl(base,
+			fileLoc,
+			checksums,
+			m.toString(),
+			transport);
+	}
+
 	private void handleDependency(Dependency dep,
 		List<RemoteRepository> repos,
 		Set<Dependency> work,
 		Set<Artifact> printed,
 		JsonGenerator gen) throws MojoExecutionException {
 		Artifact art = dep.getArtifact();
+
+		ArtifactDownloadInfo metadataInfo = null;
+		String unresolvedVersion = art.getVersion();
+		if (art.isSnapshot()) {
+			VersionRequest vReq = new VersionRequest(art,
+				repos,
+				null);
+			VersionResult res;
+			try {
+				res = repoSystem.resolveVersion(
+					repoSession,
+					vReq);
+			} catch (VersionResolutionException e) {
+				throw new MojoExecutionException(
+					"Resolving version of " +
+						art.toString(),
+					e);
+			}
+			if (!res.getVersion().equals(art.getVersion())) {
+				art = new DefaultArtifact(
+					art.getGroupId(),
+					art.getArtifactId(),
+					art.getClassifier(),
+					art.getExtension(),
+					res.getVersion());
+				if (res.getRepository() instanceof
+						RemoteRepository) {
+					RemoteRepository repo =
+						(RemoteRepository) res
+							.getRepository();
+					Metadata m =
+						new DefaultMetadata(
+							art.getGroupId(),
+							art.getArtifactId(),
+							unresolvedVersion,
+							"maven-metadata.xml",
+							Metadata.Nature.RELEASE_OR_SNAPSHOT);
+					RepositoryLayout layout;
+					try {
+						layout = layoutProvider
+							.newRepositoryLayout(
+								repoSession,
+								repo);
+					} catch (NoRepositoryLayoutException e) {
+						throw new MojoExecutionException(
+							"Getting repository layout",
+							e);
+					}
+					String base = repo.getUrl();
+					/* TODO: Open the transporters all at
+					 * once */
+					try (Transporter transport =
+						transporterProvider
+							.newTransporter(
+								repoSession,
+								repo)) {
+						metadataInfo = getDownloadInfo(
+								m,
+								layout,
+								base,
+								transport);
+					} catch (NoTransporterException e) {
+						throw new
+							MojoExecutionException(
+							"No transporter for " +
+								art.toString(),
+							e);
+					}
+				}
+			}
+		}
 		ArtifactDescriptorRequest req = new ArtifactDescriptorRequest(
 			art,
 			repos,
@@ -254,12 +360,22 @@ public class Mvn2NixMojo extends AbstractMojo
 			art.getArtifactId(),
 			art.getClassifier(),
 			art.getExtension(),
-			art.getVersion());
+			unresolvedVersion);
 		if (printed.add(artKey)) {
 			gen.writeStartObject();
 			emitArtifactBody(art,
 				res.getDependencies(),
 				gen);
+			if (metadataInfo != null) {
+				gen.write("unresolved-version",
+						unresolvedVersion);
+				gen.write("repository-id",
+						res.getRepository().getId());
+				gen.writeStartObject("metadata");
+				gen.write("url", metadataInfo.url);
+				gen.write("sha1", metadataInfo.hash);
+				gen.writeEnd();
+			}
 			if (res.getRepository() instanceof RemoteRepository) {
 				RemoteRepository repo = (RemoteRepository) res
 					.getRepository();
@@ -326,7 +442,7 @@ public class Mvn2NixMojo extends AbstractMojo
 				art.getArtifactId(),
 				null,
 				"pom",
-				art.getVersion());
+				unresolvedVersion);
 			Dependency pomDep = new Dependency(pomArt,
 				"compile",
 				new Boolean(false),
