@@ -101,6 +101,9 @@ public class Mvn2NixMojo extends AbstractMojo
 	@Parameter(property="repositorySystemSession", readonly=true)
 	private DefaultRepositorySystemSession repoSession;
 
+	@Parameter(property="reactorProjects", readonly=true)
+	private List reactorProjects;
+
 	@Parameter(property="mvn2nixOutputFile",
 		defaultValue="project-info.json")
 	private String outputFile;
@@ -147,6 +150,7 @@ public class Mvn2NixMojo extends AbstractMojo
 		gen.write("version", art.getVersion());
 		gen.write("classifier", art.getClassifier());
 		gen.write("extension", art.getExtension());
+
 		if (deps != null) {
 			gen.writeStartArray("dependencies");
 			for (Dependency dep : deps) {
@@ -288,6 +292,7 @@ public class Mvn2NixMojo extends AbstractMojo
 						art.toString(),
 					e);
 			}
+
 			if (!res.getVersion().equals(art.getVersion())) {
 				art = new DefaultArtifact(
 					art.getGroupId(),
@@ -488,6 +493,10 @@ public class Mvn2NixMojo extends AbstractMojo
 		}
 	}
 
+	static Set<Dependency> work = new HashSet<Dependency>();
+	static Set<Dependency> seen = new HashSet<Dependency>();
+	static Set<Artifact> printed = new HashSet<Artifact>();
+
 	@Override
 	public void execute() throws MojoExecutionException
 	{
@@ -499,9 +508,6 @@ public class Mvn2NixMojo extends AbstractMojo
 			d);
 		repoSession.setReadOnly();
 
-		Set<Dependency> work = new HashSet<Dependency>();
-		Set<Dependency> seen = new HashSet<Dependency>();
-		Set<Artifact> printed = new HashSet<Artifact>();
 		for (Plugin p : project.getBuildPlugins()) {
 			Artifact art = new DefaultArtifact(p.getGroupId(),
 				p.getArtifactId(),
@@ -519,42 +525,47 @@ public class Mvn2NixMojo extends AbstractMojo
 				project.getDependencies()) {
 			work.add(mavenDependencyToDependency(dep));
 		}
-		try (JsonGenerator gen = Json.createGenerator(
-					new FileOutputStream(outputFile))) {
-			gen.writeStartObject();
+		if (reactorProjects.get(reactorProjects.size() -1) == project) {
+			/* This is the last project, now all the dependencies have been accumulated
+			 * and we can generate project info.
+			 */
 
-			gen.writeStartObject("project");
-			emitArtifactBody(
-				mavenArtifactToArtifact(project.getArtifact()),
-				work,
-				gen);
-			gen.writeEnd();
+			try (JsonGenerator gen = Json.createGenerator(new FileOutputStream(outputFile))) {
+				gen.writeStartObject();
 
-			gen.writeStartArray("dependencies");
-			List<RemoteRepository> repos =
-				new ArrayList<RemoteRepository>(
-					project.getRemoteProjectRepositories());
-			repos.addAll(project.getRemotePluginRepositories());
-			while (!work.isEmpty()) {
-				Iterator<Dependency> it = work.iterator();
-				Dependency dep = it.next();
-				it.remove();
+				gen.writeStartObject("project");
+				emitArtifactBody(
+				                 mavenArtifactToArtifact(project.getArtifact()),
+				                 work,
+				                 gen);
+				gen.writeEnd();
 
-				if (seen.add(dep)) {
-					handleDependency(dep,
-						repos,
-						work,
-						printed,
-						gen);
+				gen.writeStartArray("dependencies");
+				List<RemoteRepository> repos =
+				    new ArrayList<RemoteRepository>(
+				                                    project.getRemoteProjectRepositories());
+				repos.addAll(project.getRemotePluginRepositories());
+				while (!work.isEmpty()) {
+				    Iterator<Dependency> it = work.iterator();
+				    Dependency dep = it.next();
+				    it.remove();
+
+				    if (seen.add(dep)) {
+				        handleDependency(dep,
+				                         repos,
+				                         work,
+				                         printed,
+				                         gen);
+				    }
 				}
-			}
-			gen.writeEnd();
+				gen.writeEnd();
 
-			gen.writeEnd();
-		} catch (FileNotFoundException e) {
-			throw new MojoExecutionException(
-					"Opening " + outputFile,
-					e);
+				gen.writeEnd();
+			} catch (FileNotFoundException e) {
+				throw new MojoExecutionException(
+				                                 "Opening " + outputFile,
+				                                 e);
+			}
 		}
 	}
 }
