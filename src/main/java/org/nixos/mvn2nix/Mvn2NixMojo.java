@@ -508,6 +508,16 @@ public class Mvn2NixMojo extends AbstractMojo
 			d);
 		repoSession.setReadOnly();
 
+		MavenProject parent = project.getParent();
+		while(parent != null){
+		    Artifact art = new DefaultArtifact(parent.getGroupId(),
+		                                       parent.getArtifactId(),
+		                                       "pom",
+		                                       parent.getVersion());
+		    Dependency dep = new Dependency(art, "compile");
+		    work.add(dep);
+		    parent = parent.getParent();
+		}
 		for (Plugin p : project.getBuildPlugins()) {
 			Artifact art = new DefaultArtifact(p.getGroupId(),
 				p.getArtifactId(),
