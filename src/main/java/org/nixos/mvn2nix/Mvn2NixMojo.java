@@ -196,7 +196,11 @@ public class Mvn2NixMojo extends AbstractMojo
 
 		URI abs;
 		try {
-			abs = new URI(base + "/" + fileLoc);
+			if (base.endsWith("/")) {
+				abs = new URI(base + fileLoc);
+			} else {
+				abs = new URI(base + "/" + fileLoc);
+			}
 		} catch (URISyntaxException e) {
 			throw new MojoExecutionException(
 				"Parsing repository URI",
