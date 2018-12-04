@@ -23,6 +23,12 @@
 
 package org.nixos.mvn2nix;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
@@ -31,11 +37,6 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Collection;
 import java.util.Iterator;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.MalformedURLException;
@@ -45,6 +46,8 @@ import java.net.PasswordAuthentication;
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
 
+import org.apache.commons.io.FileUtils;
+import org.apache.maven.artifact.repository.ArtifactRepositoryPolicy;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugins.annotations.Mojo;
@@ -56,6 +59,7 @@ import org.apache.maven.model.Plugin;
 
 import org.eclipse.aether.RepositorySystem;
 import org.eclipse.aether.DefaultRepositorySystemSession;
+import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.resolution.ArtifactDescriptorRequest;
 import org.eclipse.aether.resolution.ArtifactDescriptorResult;
 import org.eclipse.aether.resolution.ArtifactDescriptorException;
@@ -500,15 +504,27 @@ public class Mvn2NixMojo extends AbstractMojo
 	@Override
 	public void execute() throws MojoExecutionException
 	{
+
 		repoSession = new DefaultRepositorySystemSession(repoSession);
 		ParentPOMPropagatingArtifactDescriptorReaderDelegate d = new
 			ParentPOMPropagatingArtifactDescriptorReaderDelegate();
 		repoSession.setConfigProperty(
 			ArtifactDescriptorReaderDelegate.class.getName(),
 			d);
-		repoSession.setReadOnly();
+        repoSession.setUpdatePolicy(ArtifactRepositoryPolicy.UPDATE_POLICY_ALWAYS);
+        try {
+            File tempDirectory = java.nio.file.Files.createTempDirectory(
+                    FileUtils.getTempDirectory().toPath(),
+                    "mvnEmptyRepo").toFile();
+            tempDirectory.deleteOnExit();
+            repoSession.setLocalRepositoryManager(repoSystem.newLocalRepositoryManager(repoSession,
+                    new LocalRepository(tempDirectory)));
+        } catch (IOException e) {
+            throw new MojoExecutionException("Creating temporary local repository", e);
+        }
+        repoSession.setReadOnly();
 
-		MavenProject parent = project.getParent();
+        MavenProject parent = project.getParent();
 		while(parent != null){
 		    Artifact art = new DefaultArtifact(parent.getGroupId(),
 		                                       parent.getArtifactId(),
