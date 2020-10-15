@@ -23,6 +23,7 @@
 
 package org.nixos.mvn2nix;
 
+import java.io.OutputStream;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
@@ -76,6 +77,7 @@ import org.eclipse.aether.spi.connector.transport.Transporter;
 import org.eclipse.aether.spi.connector.transport.TransporterProvider;
 import org.eclipse.aether.transfer.NoRepositoryLayoutException;
 import org.eclipse.aether.transfer.NoTransporterException;
+import org.fusesource.jansi.AnsiConsole;
 
 /**
  * A Mojo to generate JSON for use with nix's Maven repository generation
@@ -104,8 +106,7 @@ public class Mvn2NixMojo extends AbstractMojo
 	@Parameter(property="reactorProjects", readonly=true)
 	private List reactorProjects;
 
-	@Parameter(property="mvn2nixOutputFile",
-		defaultValue="project-info.json")
+	@Parameter(property="outputFile")
 	private String outputFile;
 
 	private Exclusion mavenExclusionToExclusion(
@@ -540,7 +541,24 @@ public class Mvn2NixMojo extends AbstractMojo
 			 * and we can generate project info.
 			 */
 
-			try (JsonGenerator gen = Json.createGenerator(new FileOutputStream(outputFile))) {
+
+			/*
+			 * We write to either STDOUT or if a file is provided, that file.
+			 * Maven hijacks System.out and installs an ANSI aware PrintStream; let's just grab
+			 * the original raw STDOUT.
+			 */
+			OutputStream os = AnsiConsole.system_out;
+			if (outputFile != null) {
+				try {
+					os = new FileOutputStream(outputFile);
+				}  catch (FileNotFoundException e) {
+					throw new MojoExecutionException(
+							"Opening " + outputFile,
+							e);
+				}
+			}
+
+			try (JsonGenerator gen = Json.createGenerator(os)) {
 				gen.writeStartObject();
 
 				gen.writeStartObject("project");
@@ -571,10 +589,6 @@ public class Mvn2NixMojo extends AbstractMojo
 				gen.writeEnd();
 
 				gen.writeEnd();
-			} catch (FileNotFoundException e) {
-				throw new MojoExecutionException(
-				                                 "Opening " + outputFile,
-				                                 e);
 			}
 		}
 	}

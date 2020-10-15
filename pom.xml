@@ -4,7 +4,7 @@
 
   <groupId>org.nixos.mvn2nix</groupId>
   <artifactId>mvn2nix-maven-plugin</artifactId>
-  <version>1.2.1</version>
+  <version>1.2.2</version>
   <packaging>maven-plugin</packaging>
 
   <name>mvn2nix</name>
@@ -69,6 +69,11 @@
       <artifactId>javax.json</artifactId>
       <version>1.0.4</version>
       <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.fusesource.jansi</groupId>
+      <artifactId>jansi</artifactId>
+      <version>1.18</version>
     </dependency>
   </dependencies>
   <build>
