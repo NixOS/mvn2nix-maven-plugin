@@ -27,20 +27,13 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.HashSet;
-import java.util.Map;
-import java.util.HashMap;
 import java.util.Collection;
 import java.util.Iterator;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
-import java.io.InputStream;
-import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.MalformedURLException;
-import java.net.Authenticator;
-import java.net.PasswordAuthentication;
 
 import javax.json.Json;
 import javax.json.stream.JsonGenerator;
@@ -196,7 +189,7 @@ public class Mvn2NixMojo extends AbstractMojo
 
 		URI abs;
 		try {
-			abs = new URI(base + "/" + fileLoc);
+			abs = new URI(base).resolve(fileLoc);
 		} catch (URISyntaxException e) {
 			throw new MojoExecutionException(
 				"Parsing repository URI",
