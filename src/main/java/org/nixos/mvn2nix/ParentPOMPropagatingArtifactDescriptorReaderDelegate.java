@@ -33,7 +33,7 @@ import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.graph.Dependency;
 
 /**
- * An <tt>ArtifactDescriptorReaderDelegate</tt> that adds any
+ * An <code>ArtifactDescriptorReaderDelegate</code> that adds any
  * &lt;parent&gt; POMs as dependencies.
  *
  * @author Shea Levy
