@@ -1,6 +1,8 @@
 mvn2nix
 ========
 
+![master](https://github.com/fzakaria/shrinkwrap/actions/workflows/build-and-test.yml/badge.svg)
+
 Generate `project-info.json` for use with nix's Maven repository generation
 functions.
 
