@@ -1,9 +1,9 @@
 name: Build and test mvn2nix-maven-plugin
 
 on:
-  - push
-  - pull_request
-
+  pull_request:
+    branches:
+      - master
 jobs:
   build:
 
@@ -15,7 +15,7 @@ jobs:
       uses: actions/setup-java@v3
       with:
         java-version: '17'
-        distribution: 'temurin'
+        distribution: 'adopt'
         cache: maven
     - name: Build with Maven
-      run: mvn -B package --file pom.xml
+      run: mvn --batch-mode package --file pom.xml
