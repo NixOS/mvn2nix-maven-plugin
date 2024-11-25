@@ -1,6 +1,8 @@
 mvn2nix
 ========
 
+**Archived**: see <https://github.com/fzakaria/mvn2nix>
+
 ![master](https://github.com/NixOS/mvn2nix-maven-plugin/actions/workflows/main.yml/badge.svg)
 
 Generate `project-info.json` for use with nix's Maven repository generation
